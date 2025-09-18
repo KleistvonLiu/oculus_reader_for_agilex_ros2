@@ -101,6 +101,8 @@ class OculusReader:
             if not installed or reinstall:
                 if APK_path is None:
                     APK_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'APK', 'teleop-debug.apk')
+                    APK_path = "/home/kleist/Documents/Code/questVR_ws/src/oculus_reader/APK/teleop-debug.apk"
+                    APK_path = "/home/kleist/Documents/Code/oculus_reader/oculus_reader/APK/teleop-debug_for_meta3.apk"
                 success = self.device.install(APK_path, test=True, reinstall=reinstall)
                 installed = self.device.is_installed(self.APK_name)
                 if installed and success:
