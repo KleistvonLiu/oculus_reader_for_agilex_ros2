@@ -418,12 +418,12 @@ class VR(Node):
             self.base_RR = self.tools.matrix2Pose(transformations['r'])
 
         RR_ = calc_pose_incre(self.base_RR, RR)
+        print(f"calculated rpy: {RR_[3] * 180/math.pi,  RR_[4] * 180/math.pi, RR_[5] * 180/math.pi}")
 
         # 右扳机控制夹爪
         r_gripper_value = 0.0
         if buttons and 'rightTrig' in buttons and buttons['rightTrig']:
             r_gripper_value = buttons['rightTrig'][0] * 0.07
-
         # B 键：开始遥操作
         self.get_ik_solution(RR_[0], RR_[1], RR_[2], RR_[3], RR_[4], RR_[5],
                              r_gripper_value, buttons.get('B', False))

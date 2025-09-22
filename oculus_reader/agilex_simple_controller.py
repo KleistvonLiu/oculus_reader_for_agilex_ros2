@@ -26,6 +26,8 @@ class WristLeftListener(Node):
         self.piper.EnableArm(7)
         self.piper.GripperCtrl(0, 1000, 0x01, 0)
 
+        self._cb_count = 0
+
     def joint_states_callback(self, msg: JointState):
         """
         订阅 JointState：
@@ -56,6 +58,12 @@ class WristLeftListener(Node):
         # 成功更新缓存
         self.current_joint_positions = positions
         self.joint_positions_received = True
+
+        # ---- 计数器节流：每两次回调才下发一次 ----
+        # self._cb_count = (self._cb_count + 1) % 2
+        # if self._cb_count != 0:
+        #     return
+        # ----------------------------------------
 
         # # 这里随便打印一下前两关节，确认在动（可删）
         # self.get_logger().info(

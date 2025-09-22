@@ -5,7 +5,7 @@ from tf_transformations import (quaternion_from_matrix, euler_from_matrix,
 
 class  MATHTOOLS:
     
-    # 从xyzrpy创建旋转矩阵
+    # 从xyzrpy创建旋转矩阵，内旋XYZ
     def xyzrpy2Mat(self,x, y, z, roll, pitch, yaw):
         transformation_matrix = np.eye(4)
         A = np.cos(yaw)

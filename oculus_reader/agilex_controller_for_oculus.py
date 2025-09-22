@@ -62,13 +62,12 @@ class PIPER:
         线性插值平滑到 target_joint_state；若还没收到当前关节，就持续 0.5s 直接发送目标位姿。
         """
         target = list(self.target_joint_state)
-
         if self.joint_positions_received:
             cur = list(self.current_joint_positions)
             self.node.get_logger().info(f"使用实际的当前关节位置: {cur}")
 
             duration = 0.5   # 秒
-            rate_hz = 50
+            rate_hz = 30
             steps = max(1, int(duration * rate_hz))
             inc = [(t - c) / steps for c, t in zip(cur, target)]
 
@@ -101,6 +100,29 @@ class PIPER:
                 js.name = [f'joint{i+1}' for i in range(7)]
                 js.position = target
                 self.pub_joint.publish(js)
+
+    def _send_target_once(self):
+        js = JointState()
+        js.header = Header(stamp=self._now(), frame_id='')
+        js.name = [f'joint{i + 1}' for i in range(7)]
+        js.position = self._target_tmp
+        self.pub_joint.publish(js)
+
+    def init_pose_no_current(self):
+        duration = 0.5  # 秒
+        rate_hz = 30
+        self._target_tmp = list(self.target_joint_state)
+        # 30Hz 定时器
+        self._timer_send = self.node.create_timer(1.0 / rate_hz, self._send_target_once)
+
+        # 0.5s 后停止
+        def _stop():
+            if self._timer_send is not None:
+                self._timer_send.cancel()
+                self._timer_send = None
+            self._stop_timer.cancel()
+
+        self._stop_timer = self.node.create_timer(duration, _stop)
 
     def left_init_pose(self):
         js = JointState()
