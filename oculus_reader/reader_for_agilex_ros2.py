@@ -45,8 +45,9 @@ def resolve_piper_urdf():
         if os.path.exists(cand):
             return cand
     # 3) 项目相对路径兜底（按你仓库布局自行调整）
-    here = Path(__file__).resolve().parents[1]
+    here = Path(__file__).resolve().parents[0]
     cand = here / 'piper_description' / 'urdf' / 'piper_description.urdf'
+    print(f"try to find package piper_description.urdf at {cand}")
     if cand.exists():
         return str(cand)
 
@@ -58,7 +59,7 @@ import meshcat.geometry as mg
 import pinocchio as pin
 from pinocchio import casadi as cpin
 from pinocchio.visualize import MeshcatVisualizer
-from oculus_reader import OculusReader
+from .reader import OculusReader
 
 from .tools import MATHTOOLS
 from .agilex_controller_for_oculus import PIPER
