@@ -24,7 +24,7 @@ class PIPER:
         qos1 = QoSProfile(depth=1)
 
         # 发布控制（话题名保持不变）
-        self.pub_joint = node.create_publisher(JointState, '/joint_states', qos1)
+        self.pub_joint = node.create_publisher(JointState, '/joint_cmd', qos1)
         self.left_pub_joint = node.create_publisher(JointState, '/left_joint_states', qos1)
         self.right_pub_joint = node.create_publisher(JointState, '/right_joint_states', qos1)
 

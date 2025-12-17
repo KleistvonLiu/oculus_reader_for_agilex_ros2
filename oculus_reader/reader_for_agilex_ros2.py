@@ -341,7 +341,6 @@ class VR(Node):
 
         # 夹爪坐标系到基坐标系的初始变换
         self.base_RR = [0.19, 0.0, 0.2, 0, 0, 0]
-
         # 50 Hz 定时器，替代 rospy.Rate + while 循环
         self.timer = self.create_timer(1.0 / 50.0, self._timer_cb)
 
@@ -357,8 +356,8 @@ class VR(Node):
         ])
 
         r_adj = self.tools.xyzrpy2Mat(0, 0, 0, -np.pi, 0, -np.pi / 2)
-        transform = adj_mat @ transform
-        transform = np.dot(transform, r_adj)
+        transform = adj_mat @ transform # 这一步是不同坐标系的变换，应该是从右手-右-上-后改为右手-前-左-上
+        transform = np.dot(transform, r_adj) #这一步没看懂，目的应该是把T_grip_in_head，做一个转换，右乘？可能是：把openxr的右手-右-上-后，改为右手-下-左-前，对应了初始位置的时候，实际上获取到的末端位姿是0，85，0，但是假定是0，0，0；更可能是右手-下-左-前本来就是末端的初始位置，这里使用的逆解和松灵内部的逆解可能不一样，所以获得的位姿是有偏差的。
         return transform
 
     def publish_transform(self, transform, name):
@@ -419,7 +418,7 @@ class VR(Node):
             self.base_RR = self.tools.matrix2Pose(transformations['r'])
 
         RR_ = calc_pose_incre(self.base_RR, RR)
-        print(f"calculated rpy: {RR_[3] * 180/math.pi,  RR_[4] * 180/math.pi, RR_[5] * 180/math.pi}")
+        # print(f"calculated rpy: {RR_[3] * 180/math.pi,  RR_[4] * 180/math.pi, RR_[5] * 180/math.pi}")
 
         # 右扳机控制夹爪
         r_gripper_value = 0.0
