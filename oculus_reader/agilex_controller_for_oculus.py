@@ -1,14 +1,45 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import math
 import time
-from typing import List
+from typing import List, Sequence
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
+from geometry_msgs.msg import PoseStamped
+
+
+def rpy_to_quat(roll: float, pitch: float, yaw: float):
+    """
+    ZYX (yaw-pitch-roll) to quaternion.
+    Returns (qx, qy, qz, qw)
+    """
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
+
+    qw = cr * cp * cy + sr * sp * sy
+    qx = sr * cp * cy - cr * sp * sy
+    qy = cr * sp * cy + sr * cp * sy
+    qz = cr * cp * sy - sr * sp * cy
+
+    n = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+    if n > 1e-12:
+        qx /= n
+        qy /= n
+        qz /= n
+        qw /= n
+    else:
+        qx = qy = qz = 0.0
+        qw = 1.0
+    return qx, qy, qz, qw
 
 
 class PIPER:
@@ -24,22 +55,44 @@ class PIPER:
         qos1 = QoSProfile(depth=1)
 
         # 发布控制（话题名保持不变）
-        self.pub_joint = node.create_publisher(JointState, '/joint_cmd', qos1)
-        self.left_pub_joint = node.create_publisher(JointState, '/left_joint_states', qos1)
-        self.right_pub_joint = node.create_publisher(JointState, '/right_joint_states', qos1)
+        self.pub_joint = node.create_publisher(JointState, "/joint_cmd", qos1)
+        self.left_pub_joint = node.create_publisher(
+            JointState, "/left_joint_states", qos1
+        )
+        self.right_pub_joint = node.create_publisher(
+            JointState, "/right_joint_states", qos1
+        )
+        # 新增：末端位姿发布
+        node.declare_parameter("end_pose_topic", "/end_pose")
+        node.declare_parameter("end_pose_frame", "base_link")
+        self.end_pose_topic = node.get_parameter("end_pose_topic").value
+        self.end_pose_frame = node.get_parameter("end_pose_frame").value
+        self.pub_end_pose = node.create_publisher(
+            PoseStamped, self.end_pose_topic, qos1
+        )
 
         # 目标关节参数（ROS2：先声明再读取）
-        node.declare_parameter('target_joint_state', [0.0] * 7)
+        # TODO
+        node.declare_parameter(
+            "target_joint_state",
+            [
+                -1.9180948502311685,
+                2.267468082683052,
+                0.8194443876155757,
+                -1.5790771865200035,
+                -0.4804221698989467,
+                -0.7388317797362003,
+                -0.67930158062583
+                # -0.7209474812254385,1.9092643939519056,-0.08649518451641883,-1.3828261559993629,1.1064677725213568,-0.949010636757348,-0.9079596330820415
+            ],
+        )
         self.target_joint_state: List[float] = list(
-            node.get_parameter('target_joint_state').value
+            node.get_parameter("target_joint_state").value
         )
 
         # 订阅当前关节（单臂）状态
         node.create_subscription(
-            JointState,
-            'joint_states_single',
-            self.joint_states_callback,
-            qos1
+            JointState, "joint_states_single", self.joint_states_callback, qos1
         )
 
         # 当前关节状态缓存
@@ -59,52 +112,23 @@ class PIPER:
     # ---------------------- 动作接口 ----------------------
     def init_pose(self):
         """
-        线性插值平滑到 target_joint_state；若还没收到当前关节，就持续 0.5s 直接发送目标位姿。
+        直接发送初始位姿，设置effort的标志位
         """
         target = list(self.target_joint_state)
-        if self.joint_positions_received:
-            cur = list(self.current_joint_positions)
-            self.node.get_logger().info(f"使用实际的当前关节位置: {cur}")
-
-            duration = 0.5   # 秒
-            rate_hz = 30
-            steps = max(1, int(duration * rate_hz))
-            inc = [(t - c) / steps for c, t in zip(cur, target)]
-
-            start_t = self.node.get_clock().now()
-
-            for s in range(steps + 1):
-                pos = [c + d * s for c, d in zip(cur, inc)]
-                js = JointState()
-                js.header = Header(stamp=self._now(), frame_id='')
-                js.name = [f'joint{i+1}' for i in range(7)]
-                js.position = pos
-                self.pub_joint.publish(js)
-                time.sleep(1.0 / rate_hz)
-
-            # 最后一帧精确目标
-            js = JointState()
-            js.header = Header(stamp=self._now(), frame_id='')
-            js.name = [f'joint{i+1}' for i in range(7)]
-            js.position = target
-            self.pub_joint.publish(js)
-
-            elapsed = (self.node.get_clock().now() - start_t).nanoseconds / 1e9
-            # self.node.get_logger().info(f"完成，用时 {elapsed:.2f}s")
-
-        else:
-            start = self.node.get_clock().now()
-            while (self.node.get_clock().now() - start).nanoseconds < int(0.5 * 1e9):
-                js = JointState()
-                js.header = Header(stamp=self._now(), frame_id='')
-                js.name = [f'joint{i+1}' for i in range(7)]
-                js.position = target
-                self.pub_joint.publish(js)
+        js = JointState()
+        js.header = Header(stamp=self._now(), frame_id="")
+        js.name = [f"joint{i + 1}" for i in range(7)]
+        js.position = target
+        dof = len(self.target_joint_state)
+        js.effort = [0.0] * dof
+        js.effort[0] = 666.0
+        self.pub_joint.publish(js)
+        self.node.get_logger().info(f"target joint state: {self.target_joint_state}")
 
     def _send_target_once(self):
         js = JointState()
-        js.header = Header(stamp=self._now(), frame_id='')
-        js.name = [f'joint{i + 1}' for i in range(7)]
+        js.header = Header(stamp=self._now(), frame_id="")
+        js.name = [f"joint{i + 1}" for i in range(7)]
         js.position = self._target_tmp
         self.pub_joint.publish(js)
 
@@ -126,49 +150,99 @@ class PIPER:
 
     def left_init_pose(self):
         js = JointState()
-        js.header = Header(stamp=self._now(), frame_id='')
-        js.name = [f'joint{i+1}' for i in range(7)]
+        js.header = Header(stamp=self._now(), frame_id="")
+        js.name = [f"joint{i + 1}" for i in range(7)]
         js.position = [0.0] * 7
         self.left_pub_joint.publish(js)
         print("send left joint init command")
 
     def right_init_pose(self):
         js = JointState()
-        js.header = Header(stamp=self._now(), frame_id='')
-        js.name = [f'joint{i+1}' for i in range(7)]
+        js.header = Header(stamp=self._now(), frame_id="")
+        js.name = [f"joint{i + 1}" for i in range(7)]
         js.position = [0.0] * 7
         self.right_pub_joint.publish(js)
         print("send right joint init command")
 
     def joint_control_piper(self, j1, j2, j3, j4, j5, j6, gripper):
         js = JointState()
-        js.header = Header(stamp=self._now(), frame_id='')
-        js.name = [f'joint{i+1}' for i in range(7)]
+        js.header = Header(stamp=self._now(), frame_id="")
+        js.name = [f"joint{i + 1}" for i in range(7)]
         js.position = [j1, j2, j3, j4, j5, j6, gripper]
         self.pub_joint.publish(js)
         print("send joint control piper command")
 
     def left_joint_control_piper(self, j1, j2, j3, j4, j5, j6, gripper):
         js = JointState()
-        js.header = Header(stamp=self._now(), frame_id='')
-        js.name = [f'joint{i+1}' for i in range(7)]
+        js.header = Header(stamp=self._now(), frame_id="")
+        js.name = [f"joint{i + 1}" for i in range(7)]
         js.position = [j1, j2, j3, j4, j5, j6, gripper]
         self.left_pub_joint.publish(js)
         print("send left joint control piper command")
 
     def right_joint_control_piper(self, j1, j2, j3, j4, j5, j6, gripper):
         js = JointState()
-        js.header = Header(stamp=self._now(), frame_id='')
-        js.name = [f'joint{i+1}' for i in range(7)]
+        js.header = Header(stamp=self._now(), frame_id="")
+        js.name = [f"joint{i + 1}" for i in range(7)]
         js.position = [j1, j2, j3, j4, j5, j6, gripper]
         self.right_pub_joint.publish(js)
         print("send right joint control piper command")
+
+    # ---------------------- 末端位姿发布接口 ----------------------
+    def publish_end_pose_quat(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        qx: float,
+        qy: float,
+        qz: float,
+        qw: float,
+        frame_id: str = None,
+    ):
+        """
+        发布 PoseStamped，四元数输入。
+        """
+        ps = PoseStamped()
+        ps.header.stamp = self._now()
+        ps.header.frame_id = frame_id if frame_id is not None else self.end_pose_frame
+
+        ps.pose.position.x = float(x)
+        ps.pose.position.y = float(y)
+        ps.pose.position.z = float(z)
+
+        ps.pose.orientation.x = float(qx)
+        ps.pose.orientation.y = float(qy)
+        ps.pose.orientation.z = float(qz)
+        ps.pose.orientation.w = float(qw)
+
+        self.pub_end_pose.publish(ps)
+
+    def publish_end_pose_rpy(
+        self, xyzrpy: Sequence[float], frame_id: str = None, degrees: bool = False
+    ):
+        """
+        新增：输入 [x, y, z, roll, pitch, yaw] 发布 PoseStamped。
+        - 默认 roll/pitch/yaw 为弧度
+        - degrees=True 时视为角度
+        """
+        if len(xyzrpy) != 6:
+            raise ValueError("xyzrpy must be length 6: [x, y, z, roll, pitch, yaw]")
+
+        x, y, z, roll, pitch, yaw = xyzrpy
+        if degrees:
+            roll = math.radians(roll)
+            pitch = math.radians(pitch)
+            yaw = math.radians(yaw)
+
+        qx, qy, qz, qw = rpy_to_quat(roll, pitch, yaw)
+        self.publish_end_pose_quat(x, y, z, qx, qy, qz, qw, frame_id=frame_id)
 
 
 # ------- 可选：单独运行的包装节点（测试用） -------
 class PiperNode(Node):
     def __init__(self):
-        super().__init__('control_piper_node')
+        super().__init__("control_piper_node")
         self.piper = PIPER(self)
         # 示例：启动后 0.5s 做一次平滑回零
         self.create_timer(0.5, self._once)
@@ -193,5 +267,5 @@ def main():
         rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
