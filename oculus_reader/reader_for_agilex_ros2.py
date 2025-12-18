@@ -169,8 +169,10 @@ def calc_pose_incre_v2(tools, T_end_in_base, base_pose, pose_data):
     )
     delta_T = np.dot(np.linalg.inv(begin_matrix), end_matrix)
     r_adj = tools.xyzrpy2Mat(0, 0, 0, 0, -np.pi / 2, 0)
-    transformed_matrix = np.dot(r_adj, delta_T)
-    result_matrix = np.dot(zero_matrix, transformed_matrix)
+    # transformed_matrix = np.dot(r_adj, delta_T)
+    # print(f"delta_T: {delta_T}")
+    # print(f"transformed_matrix: {transformed_matrix}")
+    result_matrix = np.dot(zero_matrix, delta_T)
     xyzrpy = matrix_to_xyzrpy(result_matrix)
     return xyzrpy
 
@@ -452,7 +454,7 @@ class VR(Node):
         self.piper_control = PIPER(self)
         self.tools = MATHTOOLS()
         # self.inverse_solution = Arm_IK()
-        self.piper_control.init_pose()
+        # self.piper_control.init_pose()
 
         # TF 广播器（ROS2 需要绑定 node）
         self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
@@ -489,7 +491,8 @@ class VR(Node):
 
         adj_mat = np.array([[0, -1, 0, 0], [0, 0, 1, 0], [-1, 0, 0, 0], [0, 0, 0, 1]])
 
-        r_adj = self.tools.xyzrpy2Mat(0, 0, 0, -np.pi / 2, 0, -np.pi / 2)
+        # r_adj = self.tools.xyzrpy2Mat(0, 0, 0, -np.pi / 2, 0, -np.pi / 2)
+        r_adj = self.tools.xyzrpy2Mat(0, 0, 0, 0, -np.pi / 2, np.pi / 2)
         transform = (
             adj_mat @ transform
         )  # 这一步是不同坐标系的变换，应该是从右手-下-后-左改为右手-前-左-上
@@ -573,6 +576,7 @@ class VR(Node):
         self._prev_button1_down = button1_down
 
         RR_ = calc_pose_incre(self.T_end_in_base, self.base_RR, RR)
+        # RR_ = calc_pose_incre_v2(self.tools, self.T_end_in_base, self.base_RR, RR)
         # print(f"calculated rpy: {RR_[3] * 180/math.pi,  RR_[4] * 180/math.pi, RR_[5] * 180/math.pi}")
 
         # 右扳机控制夹爪
