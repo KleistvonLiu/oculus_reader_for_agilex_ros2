@@ -550,7 +550,11 @@ class VR(Node):
         transformations, buttons = self.oculus_reader.get_transformations_and_buttons()
         if not transformations or self.transformation_index not in transformations:
             return
-
+        ###############
+        # T_g_in_h = transformations[self.transformation_index]
+        # xyzrpy = matrix_to_xyzrpy(T_g_in_h)
+        # print(f"T grip in head: {xyzrpy[3] * 180/math.pi,  xyzrpy[4] * 180/math.pi, xyzrpy[5] * 180/math.pi}")
+        ###############
         # 对齐坐标
         transformations[self.transformation_index] = self.adjustment_matrix(transformations[self.transformation_index])
         right_controller_pose = transformations[self.transformation_index]
