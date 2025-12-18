@@ -142,6 +142,37 @@ def calc_pose_incre(T_end_in_base, base_pose, pose_data):
     xyzrpy = matrix_to_xyzrpy(result_matrix)
     return xyzrpy
 
+def calc_pose_incre_v2(tools, T_end_in_base, base_pose, pose_data):
+    begin_matrix = create_transformation_matrix(
+        base_pose[0],
+        base_pose[1],
+        base_pose[2],
+        base_pose[3],
+        base_pose[4],
+        base_pose[5],
+    )
+    end_matrix = create_transformation_matrix(
+        pose_data[0],
+        pose_data[1],
+        pose_data[2],
+        pose_data[3],
+        pose_data[4],
+        pose_data[5],
+    )
+    zero_matrix = create_transformation_matrix(
+        T_end_in_base[0],
+        T_end_in_base[1],
+        T_end_in_base[2],
+        T_end_in_base[3],
+        T_end_in_base[4],
+        T_end_in_base[5],
+    )
+    delta_T = np.dot(np.linalg.inv(begin_matrix), end_matrix)
+    r_adj = tools.xyzrpy2Mat(0, 0, 0, 0, -np.pi / 2, 0)
+    transformed_matrix = np.dot(r_adj, delta_T)
+    result_matrix = np.dot(zero_matrix, transformed_matrix)
+    xyzrpy = matrix_to_xyzrpy(result_matrix)
+    return xyzrpy
 
 class Arm_IK:
     def __init__(self):
@@ -431,7 +462,12 @@ class VR(Node):
         self.oculus_reader = OculusReader()  # USB
 
         # grip坐标系到head坐标系的初始变换
-        self.base_RR = [0.19, 0.0, 0.2, 0, 0, 0]
+        self.base_RR = [0.17411799519859444,
+            -0.12435925680778907,
+            0.3133147047458282,
+            1.5658895906491053,
+            -0.009670701287884555,
+            -0.017089959037768727,]
         # 夹爪坐标系到基坐标系的初始变换
         # TODO
         self.T_end_in_base = [
@@ -443,21 +479,28 @@ class VR(Node):
             -0.017089959037768727,
         ]
         # 50 Hz 定时器，替代 rospy.Rate + while 循环
-        self.timer = self.create_timer(1.0 / 50.0, self._timer_cb)
+        self.timer = self.create_timer(1.0 / 70.0, self._timer_cb)
+        
+        self._prev_button1_down = False
 
     def adjustment_matrix(self, transform):
         if transform.shape != (4, 4):
             raise ValueError("Input transform must be a 4x4 numpy array.")
 
-        adj_mat = np.array([[0, -1, 0, 0], [0, 0, 1, 0], [-1, 1, 0, 0], [0, 0, 0, 1]])
+        adj_mat = np.array([[0, -1, 0, 0], [0, 0, 1, 0], [-1, 0, 0, 0], [0, 0, 0, 1]])
 
-        r_adj = self.tools.xyzrpy2Mat(0, 0, 0, -np.pi, 0, -np.pi / 2)
+        r_adj = self.tools.xyzrpy2Mat(0, 0, 0, -np.pi / 2, 0, -np.pi / 2)
         transform = (
             adj_mat @ transform
         )  # 这一步是不同坐标系的变换，应该是从右手-下-后-左改为右手-前-左-上
         transform = np.dot(
             transform, r_adj
         )  # 这一步没看懂，目的应该是把T_grip_in_head，做一个转换，右乘？可能是：把openxr的右手-右-上-后，改为右手-下-左-前，对应了初始位置的时候，实际上获取到的末端位姿是0，85，0，但是假定是0，0，0；更可能是右手-下-左-前本来就是末端的初始位置，这里使用的逆解和松灵内部的逆解可能不一样，所以获得的位姿是有偏差的。
+        # r_adj_2 = self.tools.xyzrpy2Mat(0, 0, 0, 0, np.pi / 2, 0)
+        # transform = np.dot(
+        #     transform, r_adj_2
+        # )
+                
         return transform
 
     def publish_transform(self, transform, name):
@@ -519,9 +562,15 @@ class VR(Node):
         RR = self.tools.matrix2Pose(transformations[self.transformation_index])
 
         # A/X 键：回原点并记录基坐标
-        if buttons and buttons.get(self.button_1) is True:
+        button1_down = bool(buttons and buttons.get(self.button_1) is True)
+
+        # 只在“这一帧按下 && 上一帧没按下”时触发一次
+        if button1_down and not self._prev_button1_down:
             self.piper_control.init_pose()
             self.base_RR = self.tools.matrix2Pose(transformations[self.transformation_index])
+
+        # 更新上一帧状态（一定要放在最后）
+        self._prev_button1_down = button1_down
 
         RR_ = calc_pose_incre(self.T_end_in_base, self.base_RR, RR)
         # print(f"calculated rpy: {RR_[3] * 180/math.pi,  RR_[4] * 180/math.pi, RR_[5] * 180/math.pi}")
