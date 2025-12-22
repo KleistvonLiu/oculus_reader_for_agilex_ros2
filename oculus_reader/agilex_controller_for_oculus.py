@@ -59,18 +59,28 @@ class PIPER:
         # 发布控制（话题名保持不变）
         self.pub_joint = node.create_publisher(JointState, "/joint_cmd", qos1)
         self.left_pub_joint = node.create_publisher(
-            JointState, "/left_joint_states", qos1
+            JointState, "/joint_cmd", qos1
         )
         self.right_pub_joint = node.create_publisher(
             JointState, "/right_joint_states", qos1
         )
         # 新增：末端位姿发布
         node.declare_parameter("end_pose_topic", "/end_pose")
+        node.declare_parameter("left_end_pose_topic", "/end_pose")
+        node.declare_parameter("right_end_pose_topic", "/right_end_pose")
         node.declare_parameter("end_pose_frame", "base_link")
         self.end_pose_topic = node.get_parameter("end_pose_topic").value
+        self.left_end_pose_topic = node.get_parameter("left_end_pose_topic").value
+        self.right_end_pose_topic = node.get_parameter("right_end_pose_topic").value
         self.end_pose_frame = node.get_parameter("end_pose_frame").value
         self.pub_end_pose = node.create_publisher(
             PoseStamped, self.end_pose_topic, qos1
+        )
+        self.pub_left_end_pose = node.create_publisher(
+            PoseStamped, self.left_end_pose_topic, qos1
+        )
+        self.pub_right_end_pose = node.create_publisher(
+            PoseStamped, self.right_end_pose_topic, qos1
         )
 
         # 目标关节参数（ROS2：先声明再读取）
@@ -88,8 +98,15 @@ class PIPER:
                 # -0.7209474812254385,1.9092643939519056,-0.08649518451641883,-1.3828261559993629,1.1064677725213568,-0.949010636757348,-0.9079596330820415
             ],
         )
+        node.declare_parameter(
+            "right_target_joint_state",
+            [0.0] * 7,  # TODO: set right controller target joint state
+        )
         self.target_joint_state: List[float] = list(
             node.get_parameter("target_joint_state").value
+        )
+        self.right_target_joint_state: List[float] = list(
+            node.get_parameter("right_target_joint_state").value
         )
 
         # 订阅当前关节（单臂）状态
@@ -112,11 +129,14 @@ class PIPER:
             # self.node.get_logger().debug(f"recv joint pos: {self.current_joint_positions}")
 
     # ---------------------- 动作接口 ----------------------
-    def init_pose(self):
+    def init_pose(self, arm: str = "default"):
         """
         直接发送初始位姿，设置effort的标志位
         """
-        target = list(self.target_joint_state)
+        if arm == "right":
+            target = list(self.right_target_joint_state)
+        else:
+            target = list(self.target_joint_state)
         js = JointState()
         js.header = Header(stamp=self._now(), frame_id="")
         js.name = [f"joint{i + 1}" for i in range(7)]
@@ -124,8 +144,15 @@ class PIPER:
         dof = len(self.target_joint_state)
         js.effort = [0.0] * dof
         js.effort[0] = 666.0
-        self.pub_joint.publish(js)
-        self.node.get_logger().info(f"target joint state: {self.target_joint_state}")
+        if arm == "left":
+            self.left_pub_joint.publish(js)
+        elif arm == "right":
+            self.right_pub_joint.publish(js)
+        else:
+            self.pub_joint.publish(js)
+        self.node.get_logger().info(
+            f"target joint state ({arm}): {self.target_joint_state}"
+        )
 
     def _send_target_once(self):
         js = JointState()
@@ -201,6 +228,7 @@ class PIPER:
         qz: float,
         qw: float,
         frame_id: str = None,
+        publisher: str = "default",
     ):
         """
         发布 PoseStamped，四元数输入。
@@ -218,7 +246,12 @@ class PIPER:
         ps.pose.orientation.z = float(qz)
         ps.pose.orientation.w = float(qw)
 
-        self.pub_end_pose.publish(ps)
+        if publisher == "left":
+            self.pub_left_end_pose.publish(ps)
+        elif publisher == "right":
+            self.pub_right_end_pose.publish(ps)
+        else:
+            self.pub_end_pose.publish(ps)
 
     def publish_end_pose_rpy_old(
         self, xyzrpy: Sequence[float], frame_id: str = None, degrees: bool = False
@@ -241,7 +274,11 @@ class PIPER:
         self.publish_end_pose_quat(x, y, z, qx, qy, qz, qw, frame_id=frame_id)
     
     def publish_end_pose_rpy(
-        self, pose: Sequence[float], frame_id: str = None, degrees: bool = False
+        self,
+        pose: Sequence[float],
+        frame_id: str = None,
+        degrees: bool = False,
+        publisher: str = "default",
     ):
         """
         输入 4x4 齐次变换矩阵发布 PoseStamped。
@@ -265,6 +302,7 @@ class PIPER:
             float(quat.z),
             float(quat.w),
             frame_id=frame_id,
+            publisher=publisher,
         )
 
 

@@ -124,7 +124,10 @@ class VR(Node):
 
     def publish_end_pose(self, end_pose, gripper, b, frame_id):
         if b:
-            self.piper_control.publish_end_pose_rpy(end_pose, frame_id=frame_id)
+            publisher = "left" if frame_id == "left_controller" else "right"
+            self.piper_control.publish_end_pose_rpy(
+                end_pose, frame_id=frame_id, publisher=publisher
+            )
 
     def _timer_cb(self):
         # 读取 VR 位姿与按键
@@ -148,7 +151,8 @@ class VR(Node):
 
             button1_down = bool(buttons and buttons.get(config["button_1"]) is True)
             if button1_down and not self._prev_button1_down[controller_id]:
-                self.piper_control.init_pose()
+                arm = "left" if controller_id == "l" else "right"
+                self.piper_control.init_pose(arm=arm)
                 self.base_matrix[controller_id] = T_matrix
 
             self._prev_button1_down[controller_id] = button1_down
