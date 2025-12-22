@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import math
+import numpy as np
+import pinocchio as pin
 import time
 from typing import List, Sequence
 
@@ -218,7 +220,7 @@ class PIPER:
 
         self.pub_end_pose.publish(ps)
 
-    def publish_end_pose_rpy(
+    def publish_end_pose_rpy_old(
         self, xyzrpy: Sequence[float], frame_id: str = None, degrees: bool = False
     ):
         """
@@ -237,6 +239,33 @@ class PIPER:
 
         qx, qy, qz, qw = rpy_to_quat(roll, pitch, yaw)
         self.publish_end_pose_quat(x, y, z, qx, qy, qz, qw, frame_id=frame_id)
+    
+    def publish_end_pose_rpy(
+        self, pose: Sequence[float], frame_id: str = None, degrees: bool = False
+    ):
+        """
+        输入 4x4 齐次变换矩阵发布 PoseStamped。
+        - 仅接受 numpy 4x4 矩阵
+        - 直接由旋转矩阵生成四元数，不经欧拉角
+        """
+        if not isinstance(pose, np.ndarray) or pose.shape != (4, 4):
+            raise ValueError("pose matrix must be a 4x4 numpy array.")
+
+        translation = pose[:3, 3]
+        rotation = pose[:3, :3]
+        quat = pin.Quaternion(rotation)
+        quat.normalize()
+
+        self.publish_end_pose_quat(
+            float(translation[0]),
+            float(translation[1]),
+            float(translation[2]),
+            float(quat.x),
+            float(quat.y),
+            float(quat.z),
+            float(quat.w),
+            frame_id=frame_id,
+        )
 
 
 # ------- 可选：单独运行的包装节点（测试用） -------
