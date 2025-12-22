@@ -489,21 +489,29 @@ class VR(Node):
         if transform.shape != (4, 4):
             raise ValueError("Input transform must be a 4x4 numpy array.")
 
+        # 使用 Pinocchio 在 SE3 上完成坐标轴变换，避免裸矩阵乘法
+        se3_in = pin.SE3(transform)
+
+        adj_rotation = np.array([[0, -1, 0], [0, 0, 1], [-1, 0, 0]], dtype=float)
+        base_alignment = pin.SE3(adj_rotation, np.zeros(3))
+
+        controller_alignment = pin.SE3(
+            pin.rpy.rpyToMatrix(np.array([0.0, -np.pi / 2.0, np.pi / 2.0])),
+            np.zeros(3),
+        )
+
+        aligned = base_alignment * se3_in * controller_alignment
+        return aligned.homogeneous
+
+    def adjustment_matrix_v2(self, transform):
+        if transform.shape != (4, 4):
+            raise ValueError("Input transform must be a 4x4 numpy array.")
+
         adj_mat = np.array([[0, -1, 0, 0], [0, 0, 1, 0], [-1, 0, 0, 0], [0, 0, 0, 1]])
 
-        # r_adj = self.tools.xyzrpy2Mat(0, 0, 0, -np.pi / 2, 0, -np.pi / 2)
         r_adj = self.tools.xyzrpy2Mat(0, 0, 0, 0, -np.pi / 2, np.pi / 2)
-        transform = (
-            adj_mat @ transform
-        )  # 这一步是不同坐标系的变换，应该是从右手-下-后-左改为右手-前-左-上
-        transform = np.dot(
-            transform, r_adj
-        )  # 这一步没看懂，目的应该是把T_grip_in_head，做一个转换，右乘？可能是：把openxr的右手-右-上-后，改为右手-下-左-前，对应了初始位置的时候，实际上获取到的末端位姿是0，85，0，但是假定是0，0，0；更可能是右手-下-左-前本来就是末端的初始位置，这里使用的逆解和松灵内部的逆解可能不一样，所以获得的位姿是有偏差的。
-        # r_adj_2 = self.tools.xyzrpy2Mat(0, 0, 0, 0, np.pi / 2, 0)
-        # transform = np.dot(
-        #     transform, r_adj_2
-        # )
-                
+        transform = adj_mat @ transform
+        transform = np.dot(transform, r_adj)
         return transform
 
     def publish_transform(self, transform, name):
