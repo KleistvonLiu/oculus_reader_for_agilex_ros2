@@ -58,9 +58,7 @@ class PIPER:
 
         # 发布控制（话题名保持不变）
         self.pub_joint = node.create_publisher(JointState, "/joint_cmd", qos1)
-        self.left_pub_joint = node.create_publisher(
-            JointState, "/joint_cmd", qos1
-        )
+        self.left_pub_joint = node.create_publisher(JointState, "/joint_cmd", qos1)
         self.right_pub_joint = node.create_publisher(
             JointState, "/right_joint_states", qos1
         )
@@ -88,16 +86,25 @@ class PIPER:
         node.declare_parameter(
             "target_joint_state",
             [
-                -1.9180948502311685,
-                2.267468082683052,
-                0.8194443876155757,
-                -1.5790771865200035,
-                -0.4804221698989467,
-                -0.7388317797362003,
-                -0.67930158062583
-                # -0.7209474812254385,1.9092643939519056,-0.08649518451641883,-1.3828261559993629,1.1064677725213568,-0.949010636757348,-0.9079596330820415
+                # mode 1
+                # -1.9181,
+                # 2.2675,
+                # 0.8194,
+                # -1.5791,
+                # -0.4804,
+                # -0.7388,
+                # -0.6793,
+                # mode 2
+                -2.7090,
+                2.4792,
+                2.1667,
+                -2.0097,
+                0.2736,
+                -0.3179,
+                -0.4107,
             ],
         )
+
         node.declare_parameter(
             "right_target_joint_state",
             [0.0] * 7,  # TODO: set right controller target joint state
@@ -272,7 +279,7 @@ class PIPER:
 
         qx, qy, qz, qw = rpy_to_quat(roll, pitch, yaw)
         self.publish_end_pose_quat(x, y, z, qx, qy, qz, qw, frame_id=frame_id)
-    
+
     def publish_end_pose_rpy(
         self,
         pose: Sequence[float],

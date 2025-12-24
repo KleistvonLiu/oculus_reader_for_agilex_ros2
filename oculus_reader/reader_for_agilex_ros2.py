@@ -41,18 +41,20 @@ from .reader import OculusReader
 from .agilex_controller_for_oculus import PIPER
 
 
-def calc_pose_incre(T_end_in_base, base_pose, pose_data):
+def calc_pose_incre(T_end_in_base, base_pose, pose_data, scale = 1.0):
     if not all(isinstance(item, pin.SE3) for item in (T_end_in_base, base_pose, pose_data)):
         raise TypeError("T_end_in_base, base_pose, and pose_data must be pin.SE3.")
 
     delta = base_pose.inverse() * pose_data
+    # 缩放
+    delta.translation *= scale
     result = T_end_in_base * delta
     return result.homogeneous
 
 class VR(Node):
     def __init__(self):
         super().__init__("oculus_reader")  # ROS2: 节点名
-        self.scale_factor = 1.0
+        self.scale_factor = 1.3
         self.controller_mode = "left"  # "left" | "right" | "both"
         self.controller_configs = {
             "l": {"button_1": "X", "button_2": "Y", "trigger": "leftTrig", "frame_id": "left_controller"},
@@ -76,19 +78,35 @@ class VR(Node):
         self.oculus_reader = OculusReader()  # USB
 
         # grip坐标系到head坐标系的初始变换（左手柄）
+        # mode 1
+        # left_base_matrix = pin.SE3(
+        #     pin.rpy.rpyToMatrix(
+        #         np.array([1.5658895906491053, -0.009670701287884555, -0.017089959037768727])
+        #     ),
+        #     np.array([0.17411799519859444, -0.12435925680778907, 0.3133147047458282]),
+        # )
+        # mode 2
         left_base_matrix = pin.SE3(
             pin.rpy.rpyToMatrix(
-                np.array([1.5658895906491053, -0.009670701287884555, -0.017089959037768727])
+                np.array([2.4921, -0.0618, -0.0508])
             ),
-            np.array([0.17411799519859444, -0.12435925680778907, 0.3133147047458282]),
+            np.array([0.2739, -0.1408, -0.0768]),
         )
         # 夹爪坐标系到基坐标系的初始变换
         # TODO
+        # mode 1
+        # left_T_end_in_base = pin.SE3(
+        #     pin.rpy.rpyToMatrix(
+        #         np.array([1.5658895906491053, -0.009670701287884555, -0.017089959037768727])
+        #     ),
+        #     np.array([0.17411799519859444, -0.12435925680778907, 0.3133147047458282]),
+        # )
+        # mode 2
         left_T_end_in_base = pin.SE3(
             pin.rpy.rpyToMatrix(
-                np.array([1.5658895906491053, -0.009670701287884555, -0.017089959037768727])
+                np.array([2.4921, -0.0618, -0.0508])
             ),
-            np.array([0.17411799519859444, -0.12435925680778907, 0.3133147047458282]),
+            np.array([0.2739, -0.1408, -0.0768]),
         )
         right_zero_matrix = pin.SE3(
             pin.rpy.rpyToMatrix(np.array([0.0, 0.0, 0.0])),
@@ -142,10 +160,10 @@ class VR(Node):
                 continue
             # 对齐坐标
             aligned = self.adjustment_matrix(transformations[controller_id])
-            # 缩放
-            aligned[0, 3] *= self.scale_factor
-            aligned[1, 3] *= self.scale_factor
-            aligned[2, 3] *= self.scale_factor
+            # # 缩放
+            # aligned[0, 3] *= self.scale_factor
+            # aligned[1, 3] *= self.scale_factor
+            # aligned[2, 3] *= self.scale_factor
 
             T_matrix = pin.SE3(aligned)
 
@@ -158,7 +176,7 @@ class VR(Node):
             self._prev_button1_down[controller_id] = button1_down
 
             T_end_in_base_final = calc_pose_incre(
-                self.T_end_in_base[controller_id], self.base_matrix[controller_id], T_matrix
+                self.T_end_in_base[controller_id], self.base_matrix[controller_id], T_matrix, self.scale_factor
             )
 
             gripper_value = 0.0
