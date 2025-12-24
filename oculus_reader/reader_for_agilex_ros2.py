@@ -5,6 +5,7 @@ import os
 import math
 import time
 import threading
+from datetime import datetime
 import numpy as np
 
 # ===== ROS 2 =====
@@ -28,7 +29,11 @@ import geometry_msgs.msg
 import tf2_ros
 
 # tf_transformations（pip 包），替代 ROS1 的 tf.transformations
-from tf_transformations import quaternion_from_matrix, quaternion_from_euler
+from tf_transformations import (
+    quaternion_from_matrix,
+    quaternion_from_euler,
+    euler_from_matrix,
+)
 
 # ===== 非 ROS 依赖（原样）=====
 import casadi
@@ -124,6 +129,19 @@ class VR(Node):
         self.timer = self.create_timer(1.0 / 70.0, self._timer_cb)
         
         self._prev_button1_down = {"l": False, "r": False}
+        self.declare_parameter("log_t_matrix", True)
+        self.log_t_matrix = bool(self.get_parameter("log_t_matrix").value)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_dir = Path.cwd() / "log"
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.t_matrix_log_path = self.log_dir / f"t_matrix_log_{timestamp}.csv"
+        self._t_matrix_log_header_written = False
+        if self.log_t_matrix:
+            self._t_matrix_log_header_written = (
+                self.t_matrix_log_path.exists()
+                and self.t_matrix_log_path.stat().st_size > 0
+            )
+        self._t_matrix_log_lock = threading.Lock()
 
     def adjustment_matrix(self, transform):
         if transform.shape != (4, 4):
@@ -138,7 +156,7 @@ class VR(Node):
         )
 
         aligned = self.base_alignment * se3_in * controller_alignment
-        return aligned.homogeneous
+        return aligned
 
     def publish_end_pose(self, end_pose, gripper, b, frame_id):
         if b:
@@ -146,6 +164,26 @@ class VR(Node):
             self.piper_control.publish_end_pose_rpy(
                 end_pose, frame_id=frame_id, publisher=publisher
             )
+
+    def _log_pose(self, pose_type, controller_id, matrix, is_se3):
+        if not self.log_t_matrix:
+            return
+        if is_se3:
+            rpy = euler_from_matrix(matrix.rotation)
+            x, y, z = matrix.translation.tolist()
+        else:
+            rpy = euler_from_matrix(matrix[:3, :3])
+            x, y, z = matrix[:3, 3].tolist()
+        line = (
+            f"{time.time():.6f},{pose_type},{controller_id},"
+            f"{x:.6f},{y:.6f},{z:.6f},{rpy[0]:.6f},{rpy[1]:.6f},{rpy[2]:.6f}\n"
+        )
+        with self._t_matrix_log_lock:
+            with self.t_matrix_log_path.open("a", encoding="ascii") as f:
+                if not self._t_matrix_log_header_written:
+                    f.write("timestamp,type,controller,x,y,z,roll,pitch,yaw\n")
+                    self._t_matrix_log_header_written = True
+                f.write(line)
 
     def _timer_cb(self):
         # 读取 VR 位姿与按键
@@ -159,13 +197,8 @@ class VR(Node):
             if controller_id not in transformations:
                 continue
             # 对齐坐标
-            aligned = self.adjustment_matrix(transformations[controller_id])
-            # # 缩放
-            # aligned[0, 3] *= self.scale_factor
-            # aligned[1, 3] *= self.scale_factor
-            # aligned[2, 3] *= self.scale_factor
-
-            T_matrix = pin.SE3(aligned)
+            T_matrix = self.adjustment_matrix(transformations[controller_id])
+            self._log_pose("T_matrix", controller_id, T_matrix, True)
 
             button1_down = bool(buttons and buttons.get(config["button_1"]) is True)
             if button1_down and not self._prev_button1_down[controller_id]:
@@ -178,6 +211,7 @@ class VR(Node):
             T_end_in_base_final = calc_pose_incre(
                 self.T_end_in_base[controller_id], self.base_matrix[controller_id], T_matrix, self.scale_factor
             )
+            self._log_pose("T_end_in_base", controller_id, T_end_in_base_final, False)
 
             gripper_value = 0.0
             trigger = config["trigger"]
