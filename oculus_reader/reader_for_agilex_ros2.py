@@ -41,6 +41,8 @@ import meshcat.geometry as mg
 import pinocchio as pin
 from pinocchio import casadi as cpin
 from pinocchio.visualize import MeshcatVisualizer
+from geometry_msgs.msg import TransformStamped
+from tf_transformations import quaternion_from_matrix
 from .reader import OculusReader
 
 from .agilex_controller_for_oculus import PIPER
@@ -56,14 +58,17 @@ def calc_pose_incre(T_end_in_base, base_pose, pose_data, scale = 1.0):
     result = T_end_in_base * delta
     return result.homogeneous
 
+
+
+
 class VR(Node):
     def __init__(self):
         super().__init__("oculus_reader")  # ROS2: 节点名
         self.scale_factor = 1.3
         self.controller_mode = "left"  # "left" | "right" | "both"
         self.controller_configs = {
-            "l": {"button_1": "X", "button_2": "Y", "trigger": "leftTrig", "frame_id": "left_controller"},
-            "r": {"button_1": "A", "button_2": "B", "trigger": "rightTrig", "frame_id": "right_controller"},
+            "l": {"button_1": "X", "button_2": "Y", "trigger": "leftTrig", "frame_id": "base_link"},
+            "r": {"button_1": "A", "button_2": "B", "trigger": "rightTrig", "frame_id": "base_link"},
         }
         self._active_controllers = {
             "left": ("l",),
@@ -91,12 +96,26 @@ class VR(Node):
         #     np.array([0.17411799519859444, -0.12435925680778907, 0.3133147047458282]),
         # )
         # mode 2
+        # left_base_matrix = pin.SE3(
+        #     pin.rpy.rpyToMatrix(
+        #         np.array([2.4921, -0.0618, -0.0508])
+        #     ),
+        #     np.array([0.2739, -0.1408, -0.0768]),
+        # )
+        # mode 3
         left_base_matrix = pin.SE3(
             pin.rpy.rpyToMatrix(
-                np.array([2.4921, -0.0618, -0.0508])
+                np.array([3.0555, 0.0002, -0.0188])
             ),
-            np.array([0.2739, -0.1408, -0.0768]),
+            np.array([0.3007, -0.3661, -0.1111]),
         )
+        # mode 4
+        # left_base_matrix = pin.SE3(
+        #     pin.rpy.rpyToMatrix(
+        #         np.array([1.5708, -0.0131, 0.8245])
+        #     ),
+        #     np.array([0.4514, -0.4174, 0.0000]),
+        # )
         # 夹爪坐标系到基坐标系的初始变换
         # TODO
         # mode 1
@@ -107,12 +126,26 @@ class VR(Node):
         #     np.array([0.17411799519859444, -0.12435925680778907, 0.3133147047458282]),
         # )
         # mode 2
+        # left_T_end_in_base = pin.SE3(
+        #     pin.rpy.rpyToMatrix(
+        #         np.array([2.4921, -0.0618, -0.0508])
+        #     ),
+        #     np.array([0.2739, -0.1408, -0.0768]),
+        # )
+        # mode 3
         left_T_end_in_base = pin.SE3(
             pin.rpy.rpyToMatrix(
-                np.array([2.4921, -0.0618, -0.0508])
+                np.array([3.0555, 0.0002, -0.0188])
             ),
-            np.array([0.2739, -0.1408, -0.0768]),
+            np.array([0.3007, -0.3661, -0.1111]),
         )
+        # mode 4
+        # left_T_end_in_base = pin.SE3(
+        #     pin.rpy.rpyToMatrix(
+        #         np.array([1.5708, -0.0131, 0.8245])
+        #     ),
+        #     np.array([0.4514, -0.4174, 0.0000]),
+        # )
         right_zero_matrix = pin.SE3(
             pin.rpy.rpyToMatrix(np.array([0.0, 0.0, 0.0])),
             np.array([0.0, 0.0, 0.0]),
@@ -143,6 +176,31 @@ class VR(Node):
             )
         self._t_matrix_log_lock = threading.Lock()
 
+    def broadcast_tf_from_T(self, T_4x4: np.ndarray, parent_frame: str, child_frame: str):
+        if T_4x4.shape != (4, 4):
+            raise ValueError("pose matrix must be a 4x4 numpy array.")
+
+        R = T_4x4[:3, :3]
+        q = pin.Quaternion(R)
+        q.normalize()
+
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = parent_frame
+        t.child_frame_id = child_frame
+
+        t.transform.translation.x = float(T_4x4[0, 3])
+        t.transform.translation.y = float(T_4x4[1, 3])
+        t.transform.translation.z = float(T_4x4[2, 3])
+
+        # Pinocchio Quaternion 的系数顺序通常是 (x, y, z, w)
+        t.transform.rotation.x = float(q.x)
+        t.transform.rotation.y = float(q.y)
+        t.transform.rotation.z = float(q.z)
+        t.transform.rotation.w = float(q.w)
+
+        self.tf_broadcaster.sendTransform(t)
+    
     def adjustment_matrix(self, transform):
         if transform.shape != (4, 4):
             raise ValueError("Input transform must be a 4x4 numpy array.")
@@ -158,9 +216,9 @@ class VR(Node):
         aligned = self.base_alignment * se3_in * controller_alignment
         return aligned
 
-    def publish_end_pose(self, end_pose, gripper, b, frame_id):
+    def publish_end_pose(self, end_pose, gripper, b, frame_id,controller_id):
         if b:
-            publisher = "left" if frame_id == "left_controller" else "right"
+            publisher = "left" if controller_id == "l" else "right"
             self.piper_control.publish_end_pose_rpy(
                 end_pose, frame_id=frame_id, publisher=publisher
             )
@@ -223,7 +281,11 @@ class VR(Node):
                 gripper_value,
                 buttons.get(config["button_2"], False),
                 config["frame_id"],
+                controller_id,
             )
+            parent = "base_link"  # 你系统的基坐标系名字
+            child = f"{controller_id}_target"  # e.g. left_controller_target
+            self.broadcast_tf_from_T(T_end_in_base_final, parent, child)
 
 
 def main():
