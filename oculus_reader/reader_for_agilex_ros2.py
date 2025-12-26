@@ -162,7 +162,7 @@ class VR(Node):
         self.timer = self.create_timer(1.0 / 70.0, self._timer_cb)
         
         self._prev_button1_down = {"l": False, "r": False}
-        self.declare_parameter("log_t_matrix", True)
+        self.declare_parameter("log_t_matrix", False)
         self.log_t_matrix = bool(self.get_parameter("log_t_matrix").value)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_dir = Path.cwd() / "log"
@@ -175,6 +175,19 @@ class VR(Node):
                 and self.t_matrix_log_path.stat().st_size > 0
             )
         self._t_matrix_log_lock = threading.Lock()
+        self._t_end_in_base_log_counter = 0
+        
+        # -------- T_matrix jump detection --------
+        self.declare_parameter("t_jump_trans_thresh", 0.10)     # meters
+        self.declare_parameter("t_jump_rot_thresh_rad", 0.35)  # 0.35 rad = 20 degrees
+
+        self.t_jump_trans_thresh = float(
+            self.get_parameter("t_jump_trans_thresh").value
+        )
+        self.t_jump_rot_thresh = float(self.get_parameter("t_jump_rot_thresh_rad").value)
+        
+        # per-controller previous T_matrix cache
+        self._prev_T_matrix = {}
 
     def broadcast_tf_from_T(self, T_4x4: np.ndarray, parent_frame: str, child_frame: str):
         if T_4x4.shape != (4, 4):
@@ -223,18 +236,25 @@ class VR(Node):
                 end_pose, frame_id=frame_id, publisher=publisher
             )
 
-    def _log_pose(self, pose_type, controller_id, matrix, is_se3):
+    def _log_pose(self, pose_type, controller_id, matrix, is_se3, xyzrpy=None):
         if not self.log_t_matrix:
             return
-        if is_se3:
-            rpy = euler_from_matrix(matrix.rotation)
-            x, y, z = matrix.translation.tolist()
+
+        if xyzrpy is not None:
+            x, y, z, roll, pitch, yaw = xyzrpy
         else:
-            rpy = euler_from_matrix(matrix[:3, :3])
-            x, y, z = matrix[:3, 3].tolist()
+            if is_se3:
+                rpy = euler_from_matrix(matrix.rotation)
+                x, y, z = matrix.translation.tolist()
+                roll, pitch, yaw = rpy
+            else:
+                rpy = euler_from_matrix(matrix[:3, :3])
+                x, y, z = matrix[:3, 3].tolist()
+                roll, pitch, yaw = rpy
+
         line = (
             f"{time.time():.6f},{pose_type},{controller_id},"
-            f"{x:.6f},{y:.6f},{z:.6f},{rpy[0]:.6f},{rpy[1]:.6f},{rpy[2]:.6f}\n"
+            f"{x:.6f},{y:.6f},{z:.6f},{roll:.6f},{pitch:.6f},{yaw:.6f}\n"
         )
         with self._t_matrix_log_lock:
             with self.t_matrix_log_path.open("a", encoding="ascii") as f:
@@ -242,7 +262,32 @@ class VR(Node):
                     f.write("timestamp,type,controller,x,y,z,roll,pitch,yaw\n")
                     self._t_matrix_log_header_written = True
                 f.write(line)
+                
+    def _check_T_matrix_jump(self, controller_id: str, R_curr: np.ndarray, t_curr: np.ndarray):
+        prev = self._prev_T_matrix.get(controller_id, None)
+        if prev is None:
+            self._prev_T_matrix[controller_id] = (R_curr.copy(), t_curr.copy())
+            return
 
+        R_prev, t_prev = prev
+        dt = float(np.linalg.norm(t_curr - t_prev))
+
+        R_rel = R_prev.T @ R_curr
+        c = (np.trace(R_rel) - 1.0) / 2.0
+        c = max(-1.0, min(1.0, float(c)))
+        ang = float(math.acos(c))
+
+        if (dt > self.t_jump_trans_thresh) or (ang > self.t_jump_rot_thresh):
+            ang_deg = ang * 180.0 / math.pi
+            self.get_logger().error(
+                f"\033[31m[T_matrix jump] controller={controller_id} "
+                f"Δt={dt:.4f} m (th={self.t_jump_trans_thresh:.4f}), "
+                f"ΔR={ang_deg:.2f} deg (th={self.t_jump_rot_thresh * 180.0 / math.pi:.2f}),"
+                " 需要重新初始化！！！ \033[0m"
+            )
+
+        self._prev_T_matrix[controller_id] = (R_curr.copy(), t_curr.copy())
+        
     def _timer_cb(self):
         # 读取 VR 位姿与按键
         transformations, buttons = self.oculus_reader.get_transformations_and_buttons()
@@ -256,13 +301,40 @@ class VR(Node):
                 continue
             # 对齐坐标
             T_matrix = self.adjustment_matrix(transformations[controller_id])
-            self._log_pose("T_matrix", controller_id, T_matrix, True)
+
+            # -------- 只转换一次：从 T_matrix 取 R/t + 欧拉角 --------
+            R_tm = np.asarray(T_matrix.rotation, dtype=float)
+            t_tm = np.asarray(T_matrix.translation, dtype=float).reshape(3)
+            roll_tm, pitch_tm, yaw_tm = euler_from_matrix(R_tm)
+            xyzrpy_tm = (float(t_tm[0]), float(t_tm[1]), float(t_tm[2]),
+                         float(roll_tm), float(pitch_tm), float(yaw_tm))
+
+            # 跳变检测：直接用缓存的 R/t
+            self._check_T_matrix_jump(controller_id, R_tm, t_tm)
+
+            # CSV 记录：直接用预计算 xyzrpy，避免 _log_pose 内部再转一次
+            self._log_pose("T_matrix", controller_id, T_matrix, True, xyzrpy=xyzrpy_tm)
+
+            ########## logging ##########
+            # if self._t_end_in_base_log_counter % 100 == 0:
+            #     self.get_logger().info(
+            #         "T_matrix xyzrpy=%.6f, %.6f, %.6f, %.6f, %.6f, %.6f"
+            #         % xyzrpy_tm
+            #     )
+            ##############################
 
             button1_down = bool(buttons and buttons.get(config["button_1"]) is True)
             if button1_down and not self._prev_button1_down[controller_id]:
                 arm = "left" if controller_id == "l" else "right"
                 self.piper_control.init_pose(arm=arm)
                 self.base_matrix[controller_id] = T_matrix
+                ########## logging ##########
+                self.get_logger().info(
+                    "base_matrix[%s] xyzrpy=%.6f, %.6f, %.6f, %.6f, %.6f, %.6f"
+                    % ((controller_id,) + xyzrpy_tm)
+                )
+                ##############################
+
 
             self._prev_button1_down[controller_id] = button1_down
 
@@ -270,7 +342,21 @@ class VR(Node):
                 self.T_end_in_base[controller_id], self.base_matrix[controller_id], T_matrix, self.scale_factor
             )
             self._log_pose("T_end_in_base", controller_id, T_end_in_base_final, False)
-
+            ########## logging ##########
+            # self._t_end_in_base_log_counter += 1
+            # if self._t_end_in_base_log_counter % 100 == 0:
+            #     if isinstance(T_end_in_base_final, pin.SE3):
+            #         rpy = euler_from_matrix(T_end_in_base_final.rotation)
+            #         x, y, z = T_end_in_base_final.translation.tolist()
+            #     else:
+            #         rpy = euler_from_matrix(T_end_in_base_final[:3, :3])
+            #         x, y, z = T_end_in_base_final[:3, 3].tolist()
+            #     self.get_logger().info(
+            #         "T_end_in_base_final[%s] xyzrpy=%.6f, %.6f, %.6f, %.6f, %.6f, %.6f"
+            #         % (controller_id, x, y, z, rpy[0], rpy[1], rpy[2])
+            #     )
+            ##############################
+            
             gripper_value = 0.0
             trigger = config["trigger"]
             if buttons and trigger in buttons and buttons[trigger]:
@@ -283,9 +369,11 @@ class VR(Node):
                 config["frame_id"],
                 controller_id,
             )
-            parent = "base_link"  # 你系统的基坐标系名字
-            child = f"{controller_id}_target"  # e.g. left_controller_target
-            self.broadcast_tf_from_T(T_end_in_base_final, parent, child)
+            ########## publish tf ##########
+            # parent = "base_link"  # 你系统的基坐标系名字
+            # child = f"{controller_id}_target"  # e.g. left_controller_target
+            # self.broadcast_tf_from_T(T_end_in_base_final, parent, child)
+            ##############################
 
 
 def main():
