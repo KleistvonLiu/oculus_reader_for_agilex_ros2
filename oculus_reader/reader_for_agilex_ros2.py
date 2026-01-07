@@ -103,12 +103,12 @@ class VR(Node):
         #     np.array([0.2739, -0.1408, -0.0768]),
         # )
         # mode 3
-        left_base_matrix = pin.SE3(
-            pin.rpy.rpyToMatrix(
-                np.array([3.0555, 0.0002, -0.0188])
-            ),
-            np.array([0.3007, -0.3661, -0.1111]),
-        )
+        # left_base_matrix = pin.SE3(
+        #     pin.rpy.rpyToMatrix(
+        #         np.array([3.0555, 0.0002, -0.0188])
+        #     ),
+        #     np.array([0.3007, -0.3661, -0.1111]),
+        # )
         # mode 4
         # left_base_matrix = pin.SE3(
         #     pin.rpy.rpyToMatrix(
@@ -126,12 +126,11 @@ class VR(Node):
         # mode 6 右臂
         right_base_matrix = pin.SE3(
             pin.rpy.rpyToMatrix(
-                np.array([-3.1298, -0.0961, 1.5801])
+                np.array([3.1297, 0.0961, 1.5801])
             ),
-            np.array([-0.3025, 0.3673, -0.1099]),
+            np.array([-0.3025, 0.3673, 0.1099]),
         )
         # 夹爪坐标系到基坐标系的初始变换
-        # TODO
         # mode 1
         # left_T_end_in_base = pin.SE3(
         #     pin.rpy.rpyToMatrix(
@@ -170,9 +169,9 @@ class VR(Node):
         # mode 6 右臂
         right_T_end_in_base = pin.SE3(
             pin.rpy.rpyToMatrix(
-                np.array([-3.1298, -0.0961, 1.5801])
+                np.array([3.1297, 0.0961, 1.5801])
             ),
-            np.array([-0.3025, 0.3673, -0.1099]),
+            np.array([-0.3025, 0.3673, 0.1099]),
         )
         right_zero_matrix = pin.SE3(
             pin.rpy.rpyToMatrix(np.array([0.0, 0.0, 0.0])),
@@ -242,22 +241,34 @@ class VR(Node):
 
         self.tf_broadcaster.sendTransform(t)
     
-    def adjustment_matrix(self, transform):
+    def adjustment_matrix(self, transform, controller_id):
         if transform.shape != (4, 4):
             raise ValueError("Input transform must be a 4x4 numpy array.")
 
         # 使用 Pinocchio 在 SE3 上完成坐标轴变换，避免裸矩阵乘法
         se3_in = pin.SE3(transform)
 
-        controller_alignment = pin.SE3(
+        controller_alignment = controller_alignment = pin.SE3(
             # mode 3
             # pin.rpy.rpyToMatrix(np.array([0.0, -np.pi / 2.0, np.pi / 2.0])),
             # mode 5
-            # pin.rpy.rpyToMatrix(np.array([np.pi / 2.0, -np.pi, 0.0])),
+            pin.rpy.rpyToMatrix(np.array([np.pi / 2.0, -np.pi, 0.0])),
+            np.zeros(3),
+        ) if controller_id == "l" else pin.SE3(
             # mode 6
             pin.rpy.rpyToMatrix(np.array([-np.pi / 2.0, 0.0, 0.0])),
             np.zeros(3),
         )
+        
+        # controller_alignment = pin.SE3(
+        #     # mode 3
+        #     # pin.rpy.rpyToMatrix(np.array([0.0, -np.pi / 2.0, np.pi / 2.0])),
+        #     # mode 5
+        #     pin.rpy.rpyToMatrix(np.array([np.pi / 2.0, -np.pi, 0.0])),
+        #     # mode 6
+        #     # pin.rpy.rpyToMatrix(np.array([-np.pi / 2.0, 0.0, 0.0])),
+        #     np.zeros(3),
+        # )
 
         aligned = self.base_alignment * se3_in * controller_alignment
         return aligned
@@ -333,7 +344,7 @@ class VR(Node):
             if controller_id not in transformations:
                 continue
             # 对齐坐标
-            T_matrix = self.adjustment_matrix(transformations[controller_id])
+            T_matrix = self.adjustment_matrix(transformations[controller_id], controller_id)
 
             # -------- 只转换一次：从 T_matrix 取 R/t + 欧拉角 --------
             R_tm = np.asarray(T_matrix.rotation, dtype=float)

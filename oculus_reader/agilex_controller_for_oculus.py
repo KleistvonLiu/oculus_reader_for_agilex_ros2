@@ -60,7 +60,7 @@ class PIPER:
         self.pub_joint = node.create_publisher(JointState, "/joint_cmd", qos1)
         self.left_pub_joint = node.create_publisher(JointState, "/joint_cmd", qos1)
         self.right_pub_joint = node.create_publisher(
-            JointState, "/right_joint_states", qos1
+            JointState, "/joint_cmd", qos1
         )
         # 新增：末端位姿发布
         node.declare_parameter("end_pose_topic", "/end_pose")
@@ -107,9 +107,9 @@ class PIPER:
                 # mode 4
                 # -0.7463,0.0000,0.0000,0.0000,0.0000,0.0000,-1.5577,
                 # mode 5
-                # -0.8693, -1.2249, 0.0034, -0.7133, -0.0615, -1.1225, 0.7171,
+                -0.8693, -1.2249, 0.0034, -0.7133, -0.0615, -1.1225, 0.7171,
                 # mode test
-                -0.0,-1.14,-0.0,-0.0,-0.0,-0.0,-0.0,
+                # -0.0,-1.14,-0.0,-0.0,-0.0,-0.0,-0.0,
             ],
         )
 
