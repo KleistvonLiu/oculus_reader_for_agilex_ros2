@@ -103,15 +103,22 @@ class PIPER:
                 # -0.3179,
                 # -0.4107,
                 # mode 3
-                -0.8693,0.3437,0.0034,-0.7133,-0.0633,-1.11375,-0.8235,
+                # -0.8693,0.3437,0.0034,-0.7133,-0.0633,-1.11375,-0.8235,
                 # mode 4
                 # -0.7463,0.0000,0.0000,0.0000,0.0000,0.0000,-1.5577,
+                # mode 5
+                # -0.8693, -1.2249, 0.0034, -0.7133, -0.0615, -1.1225, 0.7171,
+                # mode test
+                -0.0,-1.14,-0.0,-0.0,-0.0,-0.0,-0.0,
             ],
         )
 
         node.declare_parameter(
             "right_target_joint_state",
-            [0.0] * 7,  # TODO: set right controller target joint state
+            [
+                # mode 6
+                -0.8693, -1.2249, 0.0034, -0.7133, -0.0615, -1.1225, 0.7171,
+            ],
         )
         self.target_joint_state: List[float] = list(
             node.get_parameter("target_joint_state").value
@@ -158,7 +165,7 @@ class PIPER:
         if arm == "left":
             self.left_pub_joint.publish(js)
         elif arm == "right":
-            self.right_pub_joint.publish(js)
+            self.left_pub_joint.publish(js)
         else:
             self.pub_joint.publish(js)
         self.node.get_logger().info(
@@ -260,7 +267,7 @@ class PIPER:
         if publisher == "left":
             self.pub_left_end_pose.publish(ps)
         elif publisher == "right":
-            self.pub_right_end_pose.publish(ps)
+            self.pub_left_end_pose.publish(ps)
         else:
             self.pub_end_pose.publish(ps)
 

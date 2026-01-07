@@ -65,7 +65,7 @@ class VR(Node):
     def __init__(self):
         super().__init__("oculus_reader")  # ROS2: 节点名
         self.scale_factor = 1.3
-        self.controller_mode = "left"  # "left" | "right" | "both"
+        self.controller_mode = "right"  # "left" | "right" | "both"
         self.controller_configs = {
             "l": {"button_1": "X", "button_2": "Y", "trigger": "leftTrig", "frame_id": "base_link"},
             "r": {"button_1": "A", "button_2": "B", "trigger": "rightTrig", "frame_id": "base_link"},
@@ -116,6 +116,20 @@ class VR(Node):
         #     ),
         #     np.array([0.4514, -0.4174, 0.0000]),
         # )
+        # mode 5
+        left_base_matrix = pin.SE3(
+            pin.rpy.rpyToMatrix(
+                np.array([-3.1298, -0.0961, 1.5801])
+            ),
+            np.array([-0.3025, 0.3673, -0.1099]),
+        )
+        # mode 6 右臂
+        right_base_matrix = pin.SE3(
+            pin.rpy.rpyToMatrix(
+                np.array([-3.1298, -0.0961, 1.5801])
+            ),
+            np.array([-0.3025, 0.3673, -0.1099]),
+        )
         # 夹爪坐标系到基坐标系的初始变换
         # TODO
         # mode 1
@@ -146,17 +160,31 @@ class VR(Node):
         #     ),
         #     np.array([0.4514, -0.4174, 0.0000]),
         # )
+        # mode 5
+        left_T_end_in_base = pin.SE3(
+            pin.rpy.rpyToMatrix(
+                np.array([-3.1298, -0.0961, 1.5801])
+            ),
+            np.array([-0.3025, 0.3673, -0.1099]),
+        )
+        # mode 6 右臂
+        right_T_end_in_base = pin.SE3(
+            pin.rpy.rpyToMatrix(
+                np.array([-3.1298, -0.0961, 1.5801])
+            ),
+            np.array([-0.3025, 0.3673, -0.1099]),
+        )
         right_zero_matrix = pin.SE3(
             pin.rpy.rpyToMatrix(np.array([0.0, 0.0, 0.0])),
             np.array([0.0, 0.0, 0.0]),
         )
         self.base_matrix = {
             "l": left_base_matrix,
-            "r": right_zero_matrix,  # TODO: set right controller base matrix
+            "r": right_base_matrix,  
         }
         self.T_end_in_base = {
             "l": left_T_end_in_base,
-            "r": right_zero_matrix,  # TODO: set right controller T_end_in_base
+            "r": right_T_end_in_base,  
         }
         # 50 Hz 定时器，替代 rospy.Rate + while 循环
         self.timer = self.create_timer(1.0 / 70.0, self._timer_cb)
@@ -222,7 +250,12 @@ class VR(Node):
         se3_in = pin.SE3(transform)
 
         controller_alignment = pin.SE3(
-            pin.rpy.rpyToMatrix(np.array([0.0, -np.pi / 2.0, np.pi / 2.0])),
+            # mode 3
+            # pin.rpy.rpyToMatrix(np.array([0.0, -np.pi / 2.0, np.pi / 2.0])),
+            # mode 5
+            # pin.rpy.rpyToMatrix(np.array([np.pi / 2.0, -np.pi, 0.0])),
+            # mode 6
+            pin.rpy.rpyToMatrix(np.array([-np.pi / 2.0, 0.0, 0.0])),
             np.zeros(3),
         )
 
