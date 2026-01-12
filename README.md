@@ -93,13 +93,13 @@ It is possible to stop the app from adb. Use: `adb shell am force-stop com.rail.
 
 ## ROS2 message package
 
-The `oculus_reader_msgs` package is intended to live in your ROS2 workspace
-(for example `/home/kleist/ros2_ws/src/oculus_reader_msgs`).
+The `common` package is intended to live in your ROS2 workspace
+(for example `/home/kleist/ros2_ws/src/common`).
 Build it with your ROS2 workspace and source the result before using it from other packages.
 Example:
 
 ```bash
-colcon build --packages-select oculus_reader_msgs
+colcon build --packages-select common
 source install/setup.bash
 ```
 

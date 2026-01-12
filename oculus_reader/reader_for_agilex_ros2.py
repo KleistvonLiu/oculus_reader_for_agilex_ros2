@@ -26,8 +26,9 @@ from ament_index_python.packages import (
 
 ###############
 import geometry_msgs.msg
+from sensor_msgs.msg import JointState
 import tf2_ros
-from oculus_reader_msgs.msg import OculusControllers
+from common.msg import OculusControllers, OculusInitJointState
 
 # tf_transformations（pip 包），替代 ROS1 的 tf.transformations
 from tf_transformations import (
@@ -148,12 +149,12 @@ class VR(Node):
         #     np.array([0.2739, -0.1408, -0.0768]),
         # )
         # mode 3
-        left_T_end_in_base = pin.SE3(
-            pin.rpy.rpyToMatrix(
-                np.array([3.0555, 0.0002, -0.0188])
-            ),
-            np.array([0.3007, -0.3661, -0.1111]),
-        )
+        # left_T_end_in_base = pin.SE3(
+        #     pin.rpy.rpyToMatrix(
+        #         np.array([3.0555, 0.0002, -0.0188])
+        #     ),
+        #     np.array([0.3007, -0.3661, -0.1111]),
+        # )
         # mode 4
         # left_T_end_in_base = pin.SE3(
         #     pin.rpy.rpyToMatrix(
@@ -162,23 +163,33 @@ class VR(Node):
         #     np.array([0.4514, -0.4174, 0.0000]),
         # )
         # mode 5
+        # left_T_end_in_base = pin.SE3(
+        #     pin.rpy.rpyToMatrix(
+        #         np.array([-3.1298, -0.0961, 1.5801])
+        #     ),
+        #     np.array([-0.3025, 0.3673, -0.1099]),
+        # )
+        # mode 6 右臂
+        # right_T_end_in_base = pin.SE3(
+        #     pin.rpy.rpyToMatrix(
+        #         np.array([3.1297, 0.0961, 1.5801])
+        #     ),
+        #     np.array([-0.3025, 0.3673, 0.1099]),
+        # )
+        #mode 7 左右臂
         left_T_end_in_base = pin.SE3(
             pin.rpy.rpyToMatrix(
-                np.array([-3.1298, -0.0961, 1.5801])
+                np.array([2.4018, -1.5404, 2.3428])
             ),
-            np.array([-0.3025, 0.3673, -0.1099]),
+            np.array([-0.3576, 0.4546, 0.0194]),
         )
-        # mode 6 右臂
         right_T_end_in_base = pin.SE3(
             pin.rpy.rpyToMatrix(
-                np.array([3.1297, 0.0961, 1.5801])
+                np.array([-2.4018, 1.5404, 2.3428])
             ),
-            np.array([-0.3025, 0.3673, 0.1099]),
+            np.array([-0.3576, 0.4546, -0.0194]),
         )
-        right_zero_matrix = pin.SE3(
-            pin.rpy.rpyToMatrix(np.array([0.0, 0.0, 0.0])),
-            np.array([0.0, 0.0, 0.0]),
-        )
+        ##
         self.base_matrix = {
             "l": left_base_matrix,
             "r": right_base_matrix,  
@@ -224,6 +235,11 @@ class VR(Node):
         self.pub_controllers = self.create_publisher(
             OculusControllers, self.controllers_topic, 10
         )
+        self.declare_parameter("init_joint_state_topic", "/oculus_init_joint_state")
+        self.init_joint_state_topic = self.get_parameter("init_joint_state_topic").value
+        self.pub_init_joint_state = self.create_publisher(
+            OculusInitJointState, self.init_joint_state_topic, 10
+        )
 
     def _pose_from_matrix(self, pose: np.ndarray) -> geometry_msgs.msg.Pose:
         if pose.shape != (4, 4):
@@ -241,6 +257,43 @@ class VR(Node):
         pose_msg.orientation.z = float(quat.z)
         pose_msg.orientation.w = float(quat.w)
         return pose_msg
+
+    def _build_joint_state(self, positions, stamp) -> JointState:
+        js = JointState()
+        js.header.stamp = stamp
+        js.name = [f"joint{i + 1}" for i in range(len(positions))]
+        js.position = list(positions)
+        return js
+
+    def _empty_joint_state(self, stamp) -> JointState:
+        js = JointState()
+        js.header.stamp = stamp
+        return js
+
+    def _publish_init_joint_state(self):
+        stamp = self.get_clock().now().to_msg()
+        active_ids = set(self._active_controllers.get(self.controller_mode, ("l", "r")))
+        left_valid = "l" in active_ids
+        right_valid = "r" in active_ids
+        init_msg = OculusInitJointState()
+        init_msg.header.stamp = stamp
+        init_msg.header.frame_id = ""
+        if left_valid:
+            init_msg.left = self._build_joint_state(
+                self.piper_control.target_joint_state, stamp
+            )
+        else:
+            init_msg.left = self._empty_joint_state(stamp)
+        if right_valid:
+            init_msg.right = self._build_joint_state(
+                self.piper_control.right_target_joint_state, stamp
+            )
+        else:
+            init_msg.right = self._empty_joint_state(stamp)
+        init_msg.init = True
+        init_msg.left_valid = left_valid
+        init_msg.right_valid = right_valid
+        self.pub_init_joint_state.publish(init_msg)
 
     def broadcast_tf_from_T(self, T_4x4: np.ndarray, parent_frame: str, child_frame: str):
         if T_4x4.shape != (4, 4):
@@ -274,7 +327,7 @@ class VR(Node):
         # 使用 Pinocchio 在 SE3 上完成坐标轴变换，避免裸矩阵乘法
         se3_in = pin.SE3(transform)
 
-        controller_alignment = controller_alignment = pin.SE3(
+        controller_alignment = pin.SE3(
             # mode 3
             # pin.rpy.rpyToMatrix(np.array([0.0, -np.pi / 2.0, np.pi / 2.0])),
             # mode 5
@@ -375,6 +428,7 @@ class VR(Node):
         left_button_2 = False
         right_button_1 = False
         right_button_2 = False
+        init_pose_sent = False
         for controller_id in active_ids:
             config = self.controller_configs[controller_id]
             if controller_id not in transformations:
@@ -405,8 +459,9 @@ class VR(Node):
 
             button1_down = bool(buttons and buttons.get(config["button_1"]) is True)
             if button1_down and not self._prev_button1_down[controller_id]:
-                arm = "left" if controller_id == "l" else "right"
-                self.piper_control.init_pose(arm=arm)
+                if not init_pose_sent:
+                    self._publish_init_joint_state()
+                    init_pose_sent = True
                 self.base_matrix[controller_id] = T_matrix
                 ########## logging ##########
                 self.get_logger().info(
@@ -486,8 +541,8 @@ class VR(Node):
         combined_msg.left_button_2 = left_button_2
         combined_msg.right_button_1 = right_button_1
         combined_msg.right_button_2 = right_button_2
-        combined_msg.left_valid = left_valid
-        combined_msg.right_valid = right_valid
+        combined_msg.left_valid = left_button_2
+        combined_msg.right_valid = right_button_2
         self.pub_controllers.publish(combined_msg)
 
 
