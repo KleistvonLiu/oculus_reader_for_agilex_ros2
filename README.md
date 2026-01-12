@@ -91,6 +91,18 @@ If you intend to use the precompiled APK with the predefined behavior, where the
 ### Stopping the app from adb
 It is possible to stop the app from adb. Use: `adb shell am force-stop com.rail.oculus.teleop`
 
+## ROS2 message package
+
+The `oculus_reader_msgs` package is intended to live in your ROS2 workspace
+(for example `/home/kleist/ros2_ws/src/oculus_reader_msgs`).
+Build it with your ROS2 workspace and source the result before using it from other packages.
+Example:
+
+```bash
+colcon build --packages-select oculus_reader_msgs
+source install/setup.bash
+```
+
 ## Citation
 
 If you find this work helpful, please consider citing it using the following reference:

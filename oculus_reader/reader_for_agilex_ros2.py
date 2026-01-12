@@ -27,6 +27,7 @@ from ament_index_python.packages import (
 ###############
 import geometry_msgs.msg
 import tf2_ros
+from oculus_reader_msgs.msg import OculusControllers
 
 # tf_transformations（pip 包），替代 ROS1 的 tf.transformations
 from tf_transformations import (
@@ -65,7 +66,8 @@ class VR(Node):
     def __init__(self):
         super().__init__("oculus_reader")  # ROS2: 节点名
         self.scale_factor = 1.3
-        self.controller_mode = "right"  # "left" | "right" | "both"
+        self.declare_parameter("controller_mode", "left")  # "left" | "right" | "both"
+        self.controller_mode = self.get_parameter("controller_mode").value
         self.controller_configs = {
             "l": {"button_1": "X", "button_2": "Y", "trigger": "leftTrig", "frame_id": "base_link"},
             "r": {"button_1": "A", "button_2": "B", "trigger": "rightTrig", "frame_id": "base_link"},
@@ -216,6 +218,30 @@ class VR(Node):
         # per-controller previous T_matrix cache
         self._prev_T_matrix = {}
 
+        self.declare_parameter("controllers_topic", "/oculus_controllers")
+        self.controllers_topic = self.get_parameter("controllers_topic").value
+        self.controllers_frame_id = self.controller_configs["l"]["frame_id"]
+        self.pub_controllers = self.create_publisher(
+            OculusControllers, self.controllers_topic, 10
+        )
+
+    def _pose_from_matrix(self, pose: np.ndarray) -> geometry_msgs.msg.Pose:
+        if pose.shape != (4, 4):
+            raise ValueError("pose matrix must be a 4x4 numpy array.")
+
+        pose_msg = geometry_msgs.msg.Pose()
+        pose_msg.position.x = float(pose[0, 3])
+        pose_msg.position.y = float(pose[1, 3])
+        pose_msg.position.z = float(pose[2, 3])
+
+        quat = pin.Quaternion(pose[:3, :3])
+        quat.normalize()
+        pose_msg.orientation.x = float(quat.x)
+        pose_msg.orientation.y = float(quat.y)
+        pose_msg.orientation.z = float(quat.z)
+        pose_msg.orientation.w = float(quat.w)
+        return pose_msg
+
     def broadcast_tf_from_T(self, T_4x4: np.ndarray, parent_frame: str, child_frame: str):
         if T_4x4.shape != (4, 4):
             raise ValueError("pose matrix must be a 4x4 numpy array.")
@@ -339,6 +365,16 @@ class VR(Node):
             return
         buttons = buttons or {}
         active_ids = self._active_controllers.get(self.controller_mode, ("l", "r"))
+        left_pose = geometry_msgs.msg.Pose()
+        right_pose = geometry_msgs.msg.Pose()
+        left_valid = False
+        right_valid = False
+        left_trigger = 0.0
+        right_trigger = 0.0
+        left_button_1 = False
+        left_button_2 = False
+        right_button_1 = False
+        right_button_2 = False
         for controller_id in active_ids:
             config = self.controller_configs[controller_id]
             if controller_id not in transformations:
@@ -403,21 +439,56 @@ class VR(Node):
             
             gripper_value = 0.0
             trigger = config["trigger"]
+            trigger_value_raw = 0.0
             if buttons and trigger in buttons and buttons[trigger]:
-                gripper_value = buttons[trigger][0] * 0.07
+                trigger_value_raw = float(buttons[trigger][0])
+                gripper_value = trigger_value_raw * 0.07
 
-            self.publish_end_pose(
-                T_end_in_base_final,
-                gripper_value,
-                buttons.get(config["button_2"], False),
-                config["frame_id"],
-                controller_id,
-            )
+            # self.publish_end_pose(
+            #     T_end_in_base_final,
+            #     gripper_value,
+            #     buttons.get(config["button_2"], False),
+            #     config["frame_id"],
+            #     controller_id,
+            # )
+
+            button_1 = bool(buttons.get(config["button_1"], False))
+            button_2 = bool(buttons.get(config["button_2"], False))
+            if controller_id == "l":
+                left_valid = True
+                left_pose = self._pose_from_matrix(T_end_in_base_final)
+                left_trigger = trigger_value_raw
+                left_button_1 = button_1
+                left_button_2 = button_2
+            else:
+                right_valid = True
+                right_pose = self._pose_from_matrix(T_end_in_base_final)
+                right_trigger = trigger_value_raw
+                right_button_1 = button_1
+                right_button_2 = button_2
             ########## publish tf ##########
             # parent = "base_link"  # 你系统的基坐标系名字
             # child = f"{controller_id}_target"  # e.g. left_controller_target
             # self.broadcast_tf_from_T(T_end_in_base_final, parent, child)
             ##############################
+
+        if not (left_valid or right_valid):
+            return
+
+        combined_msg = OculusControllers()
+        combined_msg.header.stamp = self.get_clock().now().to_msg()
+        combined_msg.header.frame_id = self.controllers_frame_id
+        combined_msg.left_pose = left_pose
+        combined_msg.right_pose = right_pose
+        combined_msg.left_trigger = float(left_trigger)
+        combined_msg.right_trigger = float(right_trigger)
+        combined_msg.left_button_1 = left_button_1
+        combined_msg.left_button_2 = left_button_2
+        combined_msg.right_button_1 = right_button_1
+        combined_msg.right_button_2 = right_button_2
+        combined_msg.left_valid = left_valid
+        combined_msg.right_valid = right_valid
+        self.pub_controllers.publish(combined_msg)
 
 
 def main():
