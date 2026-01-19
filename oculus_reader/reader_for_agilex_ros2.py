@@ -202,7 +202,7 @@ class VR(Node):
         self.timer = self.create_timer(1.0 / 70.0, self._timer_cb)
         
         self._prev_button1_down = {"l": False, "r": False}
-        self.declare_parameter("log_t_matrix", False)
+        self.declare_parameter("log_t_matrix", True)
         self.log_t_matrix = bool(self.get_parameter("log_t_matrix").value)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_dir = Path.cwd() / "log"
@@ -386,11 +386,11 @@ class VR(Node):
                     self._t_matrix_log_header_written = True
                 f.write(line)
                 
-    def _check_T_matrix_jump(self, controller_id: str, R_curr: np.ndarray, t_curr: np.ndarray):
+    def _check_T_matrix_jump(self, controller_id: str, R_curr: np.ndarray, t_curr: np.ndarray) -> bool:
         prev = self._prev_T_matrix.get(controller_id, None)
         if prev is None:
             self._prev_T_matrix[controller_id] = (R_curr.copy(), t_curr.copy())
-            return
+            return False
 
         R_prev, t_prev = prev
         dt = float(np.linalg.norm(t_curr - t_prev))
@@ -402,14 +402,18 @@ class VR(Node):
 
         if (dt > self.t_jump_trans_thresh) or (ang > self.t_jump_rot_thresh):
             ang_deg = ang * 180.0 / math.pi
+            ts = time.time()
             self.get_logger().error(
-                f"\033[31m[T_matrix jump] controller={controller_id} "
+                f"\033[31m[T_matrix jump] t={ts:.6f} controller={controller_id} "
                 f"Δt={dt:.4f} m (th={self.t_jump_trans_thresh:.4f}), "
                 f"ΔR={ang_deg:.2f} deg (th={self.t_jump_rot_thresh * 180.0 / math.pi:.2f}),"
                 " 需要重新初始化！！！ \033[0m"
             )
+            self._prev_T_matrix[controller_id] = (R_curr.copy(), t_curr.copy())
+            return True
 
         self._prev_T_matrix[controller_id] = (R_curr.copy(), t_curr.copy())
+        return False
         
     def _timer_cb(self):
         # 读取 VR 位姿与按键
@@ -444,7 +448,8 @@ class VR(Node):
                          float(roll_tm), float(pitch_tm), float(yaw_tm))
 
             # 跳变检测：直接用缓存的 R/t
-            self._check_T_matrix_jump(controller_id, R_tm, t_tm)
+            if self._check_T_matrix_jump(controller_id, R_tm, t_tm):
+                continue
 
             # CSV 记录：直接用预计算 xyzrpy，避免 _log_pose 内部再转一次
             self._log_pose("T_matrix", controller_id, T_matrix, True, xyzrpy=xyzrpy_tm)
