@@ -3,6 +3,7 @@
 
 import math
 import numpy as np
+import coal
 import pinocchio as pin
 import time
 from typing import List, Sequence

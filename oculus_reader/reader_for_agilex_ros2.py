@@ -38,8 +38,8 @@ from tf_transformations import (
 )
 
 # ===== 非 ROS 依赖（原样）=====
-import casadi
 import meshcat.geometry as mg
+import coal
 import pinocchio as pin
 from pinocchio import casadi as cpin
 from pinocchio.visualize import MeshcatVisualizer
@@ -235,7 +235,7 @@ class VR(Node):
         self.pub_controllers = self.create_publisher(
             OculusControllers, self.controllers_topic, 10
         )
-        self.declare_parameter("init_joint_state_topic", "/oculus_init_joint_state")
+        self.declare_parameter("init_joint_state_topic", "/joint_cmd_double_arm")
         self.init_joint_state_topic = self.get_parameter("init_joint_state_topic").value
         self.pub_init_joint_state = self.create_publisher(
             OculusInitJointState, self.init_joint_state_topic, 10
@@ -293,6 +293,8 @@ class VR(Node):
         init_msg.init = True
         init_msg.left_valid = left_valid
         init_msg.right_valid = right_valid
+        init_msg.left_gripper = 0.0
+        init_msg.right_gripper = 0.0
         self.pub_init_joint_state.publish(init_msg)
 
     def broadcast_tf_from_T(self, T_4x4: np.ndarray, parent_frame: str, child_frame: str):
